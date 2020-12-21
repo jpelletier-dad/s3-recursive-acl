@@ -21,7 +21,7 @@ func main() {
 	//flag.StringVar(&region, "region", "us-east-1", "AWS region")
 	flag.StringVar(&bucket, "bucket", "s3-bucket", "Bucket name")
 	flag.StringVar(&delim, "delimiter", "/", "Delim")
-	flag.StringVar(&root_prefix, "root_prefix", "/", "Root prefix")
+	flag.StringVar(&root_prefix, "root_prefix", "", "Root prefix")
 	flag.Parse()
 
 	// TODO I believe regions are auto-parsed from config?
