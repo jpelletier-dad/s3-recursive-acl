@@ -21,7 +21,7 @@ func main() {
 	//flag.StringVar(&region, "region", "us-east-1", "AWS region")
 	flag.StringVar(&bucket, "bucket", "s3-bucket", "Bucket name")
 	flag.StringVar(&delim, "delimiter", "/", "Delim")
-	flag.StringVar(&root_prefix, "root_prefix", "/", "Root prefix")
+	flag.StringVar(&root_prefix, "root_prefix", "", "Root prefix")
 	flag.Parse()
 
 	// TODO I believe regions are auto-parsed from config?
@@ -40,9 +40,12 @@ func main() {
 	latestObj, _ = listObjectsPrefix(svc, bucket, delim, root_prefix)
 
 	fmt.Println(fmt.Sprintf("BUCKET %s", bucket))
-	fmt.Println(fmt.Sprintf("KEY %s", *latestObj.Key))
-	fmt.Println(fmt.Sprintf("MODIFIED %s", *latestObj.LastModified))
-	//fmt.Println(fmt.Sprintf("Successfully updated permissions on %d objects", counter))
+	if latestObj != nil {
+		fmt.Println(fmt.Sprintf("KEY %s", *latestObj.Key))
+		fmt.Println(fmt.Sprintf("MODIFIED %s", *latestObj.LastModified))
+	} else {
+		fmt.Println("NO OBJECTS")
+	}
 }
 
 func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (oldestObject *s3.Object, err error) {
