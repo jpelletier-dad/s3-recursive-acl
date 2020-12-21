@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	//"sync"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
@@ -14,7 +15,6 @@ func main() {
 	//var maxKeys int64
 
 	// TODO create a worker group instead of waitgroup (prevent dead stop from single request timing out)
-	//var wg sync.WaitGroup
 	//var counter int64
 
 	// TODO these should be outside
@@ -47,6 +47,7 @@ func main() {
 
 func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (oldestObject *s3.Object, err error) {
 	var latestObj *s3.Object
+	//var wg sync.WaitGroup
 
 	err = svc.ListObjectsV2Pages(&s3.ListObjectsV2Input{
 		Bucket:    aws.String(bucket),
@@ -54,7 +55,6 @@ func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (
 		Prefix:    aws.String(prefix),
 		// TODO func (c *S3) ListObjectsV2PagesWithContext(ctx aws.Context, input *ListObjectsV2Input, fn func(*ListObjectsV2Output, bool) bool, opts ...request.Option) error
 	}, func(page *s3.ListObjectsV2Output, lastPage bool) bool {
-
 		//fmt.Println(fmt.Sprintf("Starting '%s'", *page.Contents[0].Key))
 		for _, object := range page.Contents {
 			int64_zero := new(int64)
@@ -69,17 +69,30 @@ func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (
 			//fmt.Println(fmt.Sprintf("%s", *object.Key))
 		}
 
+		latestObjs := make(chan *s3.Object)
+		var prefixCount = 0
 		for _, cp := range page.CommonPrefixes {
-			latestObj2, err := listObjectsPrefix(svc, bucket, delim, *cp.Prefix)
-			if err != nil {
-				fmt.Println(fmt.Sprintf("ERROR '%v'", err))
-				panic(fmt.Sprintf("Failed to check object permissions in '%s', %v", bucket, err))
-				// TODO here?
-				return true
-			}
+			prefixCount += 1
+			//go func(*sync.WaitGroup) {
+			go func() {
+				latestObj2, err := listObjectsPrefix(svc, bucket, delim, *cp.Prefix)
+				if err != nil {
+					fmt.Println(fmt.Sprintf("ERROR '%v'", err))
+					panic(fmt.Sprintf("Failed to check object permissions in '%s', %v", bucket, err))
+					// TODO here?
+					latestObjs <- nil
+				}
+
+				latestObjs <- latestObj2
+			}()
+		}
+
+		var l *s3.Object
+		for i := 0; i < prefixCount; i++ {
+			l = <-latestObjs
 			// TODO lock
-			if latestObj == nil || latestObj2.LastModified.After(*latestObj.LastModified) {
-				latestObj = latestObj2
+			if latestObj == nil || l.LastModified.After(*latestObj.LastModified) {
+				latestObj = l
 			}
 		}
 
