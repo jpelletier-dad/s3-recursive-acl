@@ -5,13 +5,17 @@ import (
 	"fmt"
 	//"sync"
 
+	//"runtime/debug"
+
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
 func main() {
+	//debug.SetMaxThreads(1000)
 	var bucket, delim, root_prefix string
+	var worker_count int
 	//var maxKeys int64
 
 	// TODO create a worker group instead of waitgroup (prevent dead stop from single request timing out)
@@ -22,6 +26,7 @@ func main() {
 	flag.StringVar(&bucket, "bucket", "s3-bucket", "Bucket name")
 	flag.StringVar(&delim, "delimiter", "/", "Delim")
 	flag.StringVar(&root_prefix, "root_prefix", "", "Root prefix")
+	flag.IntVar(&worker_count, "worker_count", 5000, "Worker count")
 	flag.Parse()
 
 	// TODO I believe regions are auto-parsed from config?
@@ -37,7 +42,12 @@ func main() {
 
 	var latestObj *s3.Object
 
-	latestObj, _ = listObjectsPrefix(svc, bucket, delim, root_prefix)
+	tickets := make(chan bool, worker_count)
+	for i := 1; i <= worker_count; i++ {
+		tickets <- true
+	}
+	// TODO add context object
+	latestObj, _ = listObjectsPrefix(svc, bucket, delim, root_prefix, tickets)
 
 	fmt.Println(fmt.Sprintf("BUCKET %s", bucket))
 	if latestObj != nil {
@@ -48,7 +58,7 @@ func main() {
 	}
 }
 
-func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (oldestObject *s3.Object, err error) {
+func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string, tickets chan bool) (oldestObject *s3.Object, err error) {
 	var latestObj *s3.Object
 	//var wg sync.WaitGroup
 
@@ -77,8 +87,10 @@ func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (
 		for _, cp := range page.CommonPrefixes {
 			prefixCount += 1
 			//go func(*sync.WaitGroup) {
-			go func() {
-				latestObj2, err := listObjectsPrefix(svc, bucket, delim, *cp.Prefix)
+			//fmt.Println("GOROUTINE")
+			go func(c chan bool) {
+				<-c
+				latestObj2, err := listObjectsPrefix(svc, bucket, delim, *cp.Prefix, tickets)
 				if err != nil {
 					fmt.Println(fmt.Sprintf("ERROR '%v'", err))
 					panic(fmt.Sprintf("Failed to check object permissions in '%s', %v", bucket, err))
@@ -87,7 +99,8 @@ func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (
 				}
 
 				latestObjs <- latestObj2
-			}()
+				c <- true
+			}(tickets)
 		}
 
 		var l *s3.Object
@@ -97,6 +110,12 @@ func listObjectsPrefix(svc *s3.S3, bucket string, delim string, prefix string) (
 			if latestObj == nil || l.LastModified.After(*latestObj.LastModified) {
 				latestObj = l
 			}
+		}
+		close(latestObjs)
+
+		if latestObj != nil {
+			fmt.Println(fmt.Sprintf("KEY %s", *latestObj.Key))
+			fmt.Println(fmt.Sprintf("MODIFIED %s", *latestObj.LastModified))
 		}
 
 		//fmt.Println(fmt.Sprintf("%d", counter))
